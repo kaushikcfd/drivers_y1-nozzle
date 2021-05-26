@@ -243,7 +243,6 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
     current_t = 0
     constant_cfl = False
     nstatus = 10000000000
-    rank = 0
     checkpoint_t = current_t
     current_step = 0
 
@@ -666,6 +665,7 @@ if __name__ == "__main__":
         print(f"step {restart_step}")
         print(f"name {restart_name}") 
 
+    input_file = ""
     if(args.input_file):
         input_file = (args.input_file).replace("'","")
         print(f"Reading user input from {args.input_file}")
