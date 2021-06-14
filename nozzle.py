@@ -52,7 +52,7 @@ from mirgecom.profiling import PyOpenCLProfilingArrayContext
 
 from mirgecom.euler import euler_operator
 from mirgecom.navierstokes import ns_operator
-from mirgecom.fluid import split_conserved
+from mirgecom.fluid import make_conserved
 from mirgecom.artificial_viscosity import (
     av_operator,
     smoothness_indicator
@@ -436,8 +436,8 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
             mass = 0.0*x_vec[0] + rho
             mom = velocity*mass
             energy = (pressure/(gamma - 1.0)) + np.dot(mom, mom)/(2.0*mass)
-            from mirgecom.fluid import join_conserved
-            return join_conserved(dim=self._dim, mass=mass, momentum=mom, energy=energy)
+            from mirgecom.fluid import make_conserved
+            return make_conserved(dim=self._dim, mass=mass, momentum=mom, energy=energy)
 
 
     inflow_init = IsentropicInflow(dim=dim, T0=298, P0=start_ramp_pres, 
@@ -524,7 +524,7 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
 
     vis_timer = None
 
-    local_cfl = get_inviscid_cfl(discr, eos=eos, dt=current_dt, q=current_state)
+    local_cfl = get_inviscid_cfl(discr, eos=eos, dt=current_dt, cv=current_state)
     from grudge.op import nodal_max
     cfl = nodal_max(discr, "vol", local_cfl)
 
@@ -590,19 +590,18 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
                            t_final=t_final, constant_cfl=constant_cfl)
 
     
-    def sponge(q, q_ref, sigma):
-        return(sigma*(q_ref-q))
+    def sponge(cv, cv_ref, sigma):
+        return(sigma*(cv_ref-cv))
 
     def my_rhs(t, state):
 
         return ( 
-            ns_operator(discr, q=state, t=t, boundaries=boundaries, eos=eos) +
-            av_operator(
-                discr, q=state, boundaries=boundaries,
+            ns_operator(discr, cv=state, t=t, boundaries=boundaries, eos=eos) +
+            make_conserved(dim, q=av_operator(
+                discr, q=state.join(), boundaries=boundaries,
                 boundary_kwargs={"time": t, "eos":eos},
-                alpha=alpha_sc, s0=s0_sc, kappa=kappa_sc
-            ) +
-            sponge(q=state, q_ref=ref_state, sigma=sponge_sigma)
+                alpha=alpha_sc, s0=s0_sc, kappa=kappa_sc)
+            ) + sponge(cv=state, cv_ref=ref_state, sigma=sponge_sigma)
         )
 
 
@@ -621,14 +620,14 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
             with open(restart_path+snapshot_pattern.format(casename=casename, step=step, rank=rank), "wb") as f:
                 pickle.dump({
                     "local_mesh": local_mesh,
-                    "state": obj_array_vectorize(actx.to_numpy, flatten(state)),
+                    "state": obj_array_vectorize(actx.to_numpy, flatten(state.join())),
                     "t": t,
                     "step": step,
                     "global_nelements": global_nelements,
                     "num_parts": nparts,
                     }, f)
 
-        cv = split_conserved(dim, state)
+        # cv = split_conserved(dim, state)
         # tagged_cells = smoothness_indicator(discr, cv.mass, s0=s0_sc, kappa=kappa_sc)
         # local_cfl = get_inviscid_cfl(discr, eos=eos, dt=current_dt, q=state)
         # from grudge.op import nodal_max
@@ -638,7 +637,7 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
         #               ("tagged cells", tagged_cells), 
         #               ("cfl", local_cfl)]
         return sim_checkpoint(discr=discr, visualizer=visualizer, eos=eos,
-                              q=state, vizname=viz_path+casename,
+                              cv=state, vizname=viz_path+casename,
                               step=step, t=t, dt=dt, nstatus=nstatus,
                               nviz=nviz, exittol=exittol,
                               constant_cfl=constant_cfl, comm=comm, vis_timer=vis_timer,
