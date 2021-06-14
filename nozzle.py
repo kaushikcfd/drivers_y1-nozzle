@@ -167,7 +167,7 @@ def get_pseudo_y0_mesh():
 
 
 @mpi_entry_point
-def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file="",
+def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=None,
          snapshot_pattern="{casename}-{step:06d}-{rank:04d}.pkl", 
          restart_step=None, restart_name=None,
          use_profiling=False, use_logmgr=False, use_lazy_eval=False):
@@ -206,7 +206,7 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
     nviz = 100
     nrestart = 100
     current_dt = 5e-8
-    t_final = 5.e-6
+    t_final = 1.e-6
     order = 1
     alpha_sc = 0.5
     s0_sc = -5.0
@@ -214,7 +214,7 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
     integrator="rk4"
     
 
-    if(user_input_file):
+    if user_input_file:
         #with open('run2_params.yaml') as f:
         if rank ==0:
             with open(user_input_file) as f:
@@ -286,7 +286,6 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
     current_t = 0
     constant_cfl = False
     nstatus = 10000000000
-    rank = 0
     checkpoint_t = current_t
     current_step = 0
 
@@ -350,7 +349,6 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
       temperature=T0*math.pow(temperature,-1.0)
       return temperature
 
-
     inlet_mach = getMachFromAreaRatio(area_ratio = inletAreaRatio, gamma=gamma_CO2, mach_guess = 0.01);
     # ramp the stagnation pressure
     start_ramp_pres = 1000
@@ -389,7 +387,6 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
                               temperature_left=temp_inflow, temperature_right=temp_bkrnd,
                               pressure_left=pres_inflow, pressure_right=pres_bkrnd,
                               velocity_left=vel_inflow, velocity_right=vel_outflow)
-
     # pressure ramp function
     def inflow_ramp_pressure(t, startP=start_ramp_pres, finalP=end_ramp_pres, 
                              ramp_interval=ramp_interval, t_ramp_start=t_ramp_start):
@@ -531,13 +528,13 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
     from grudge.op import nodal_max
     cfl = nodal_max(discr, "vol", local_cfl)
 
-    class Log_CFL(LogQuantity):
-        @property
-        def default_aggregator(self):
-            return min
-
-        def __call__(self):
-            return cfl
+    # class Log_CFL(LogQuantity):
+    #     @property
+    #     def default_aggregator(self):
+    #         return min
+    # 
+    #     def __call__(self):
+    #         return cfl
 
     if logmgr:
         logmgr_add_cl_device_info(logmgr, queue)
@@ -546,16 +543,13 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
         logmgr_set_time(logmgr, current_step, current_t)
         #logmgr_add_package_versions(logmgr)
 
-        logmgr.add_quantity(Log_CFL("cfl"))
+        # logmgr.add_quantity(Log_CFL("cfl"))
 
         logmgr.add_watches([
                             ("step.max", "step = {value}, "), 
                             ("t_sim.max", "sim time: {value:1.6e} s, "), 
-                            ("cfl.max", "cfl = {value:1.4f}\n"), 
                             ("min_pressure", "------- P (min, max) (Pa) = ({value:1.9e}, "),
                             ("max_pressure",    "{value:1.9e})\n"),
-                            #("min_temperature", "------- T (min, max) (K)  = ({value:1.9e}, "),
-                            #("max_temperature",    "{value:1.9e})\n"),
                             ("min_temperature", "------- T (min, max) (K)  = ({value:7g}, "),
                             ("max_temperature",    "{value:7g})\n"),
                             ("t_step.max", "------- step walltime: {value:6g} s, "),
@@ -601,27 +595,6 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
 
     def my_rhs(t, state):
 
-        # check for some troublesome output types
-        inf_exists = not np.isfinite(discr.norm(state, np.inf))
-        if inf_exists:
-            if rank == 0:
-                logging.info("Non-finite values detected in simulation, exiting...")
-            # dump right now
-            cv = split_conserved(dim, state)
-            tagged_cells = smoothness_indicator(discr, cv.mass, s0=s0_sc, kappa=kappa_sc)
-            viz_fields = [("sponge_sigma", gen_sponge()),("tagged cells", tagged_cells)]
-            sim_checkpoint(discr=discr, visualizer=visualizer, eos=eos,
-                              q=state, vizname=casename,
-                              step=999999999, t=t, dt=current_dt,
-                              nviz=1, exittol=exittol,
-                              constant_cfl=constant_cfl, comm=comm, vis_timer=vis_timer,
-                              overwrite=True, viz_fields=viz_fields)
-            exit()
-
-        #return ( euler_operator(discr, q=state, t=t,boundaries=boundaries, eos=eos)
-               #+ av_operator(discr,t=t, q=state, eos=eos, boundaries=boundaries,
-                 #alpha=alpha_sc, s0=s0_sc, kappa=kappa_sc)
-               #+ sponge(q=state, q_ref=ref_state, sigma=sponge_sigma))
         return ( 
             ns_operator(discr, q=state, t=t, boundaries=boundaries, eos=eos) +
             av_operator(
@@ -642,7 +615,6 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
             os.makedirs(viz_path)  
 
     def my_checkpoint(step, t, dt, state):
-
         write_restart = (check_step(step, nrestart)
                          if step != restart_step else False)
         if write_restart is True:
@@ -657,23 +629,24 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
                     }, f)
 
         cv = split_conserved(dim, state)
-        tagged_cells = smoothness_indicator(discr, cv.mass, s0=s0_sc, kappa=kappa_sc)
-        local_cfl = get_inviscid_cfl(discr, eos=eos, dt=current_dt, q=state)
-        from grudge.op import nodal_max
-        max_cfl = nodal_max(discr, "vol", local_cfl)
+        # tagged_cells = smoothness_indicator(discr, cv.mass, s0=s0_sc, kappa=kappa_sc)
+        # local_cfl = get_inviscid_cfl(discr, eos=eos, dt=current_dt, q=state)
+        # from grudge.op import nodal_max
+        # max_cfl = nodal_max(discr, "vol", local_cfl)
 
-        viz_fields = [("sponge_sigma", gen_sponge()), 
-                      ("tagged cells", tagged_cells), 
-                      ("cfl", local_cfl)]
+        # viz_fields = [("sponge_sigma", gen_sponge()), 
+        #               ("tagged cells", tagged_cells), 
+        #               ("cfl", local_cfl)]
         return sim_checkpoint(discr=discr, visualizer=visualizer, eos=eos,
                               q=state, vizname=viz_path+casename,
                               step=step, t=t, dt=dt, nstatus=nstatus,
                               nviz=nviz, exittol=exittol,
                               constant_cfl=constant_cfl, comm=comm, vis_timer=vis_timer,
-                              overwrite=True, viz_fields=viz_fields)
+                              overwrite=True)   # , viz_fields=viz_fields)
 
     if rank == 0:
         logging.info("Stepping.")
+
 
     (current_step, current_t, current_state) = \
         advance_state(rhs=my_rhs, timestepper=timestepper,
@@ -744,6 +717,7 @@ if __name__ == "__main__":
         print(f"step {restart_step}")
         print(f"name {restart_name}") 
 
+    input_file=None
     if(args.input_file):
         input_file = (args.input_file).replace("'","")
         print(f"Reading user input from {args.input_file}")
