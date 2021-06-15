@@ -205,6 +205,7 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
     # default input values that will be (potentially) read from input
     nviz = 100
     nrestart = 100
+    nhealth = 100
     current_dt = 5e-8
     t_final = 1.e-6
     order = 1
@@ -594,7 +595,6 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
         return(sigma*(cv_ref-cv))
 
     def my_rhs(t, state):
-
         return ( 
             ns_operator(discr, cv=state, t=t, boundaries=boundaries, eos=eos) +
             make_conserved(dim, q=av_operator(
@@ -614,34 +614,41 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
             os.makedirs(viz_path)  
 
     def my_checkpoint(step, t, dt, state):
-        write_restart = (check_step(step, nrestart)
-                         if step != restart_step else False)
-        if write_restart is True:
-            with open(restart_path+snapshot_pattern.format(casename=casename, step=step, rank=rank), "wb") as f:
-                pickle.dump({
-                    "local_mesh": local_mesh,
-                    "state": obj_array_vectorize(actx.to_numpy, flatten(state.join())),
-                    "t": t,
-                    "step": step,
-                    "global_nelements": global_nelements,
-                    "num_parts": nparts,
-                    }, f)
+        from mirgecom.simutil import (
+            write_restart_file,
+            write_visfile,
+            check_range_local
+        )
+        errors = False
+        if check_step(step, nhealth) and step > 0:
+            if check_range_local(discr, "vol", eos.pressure(state), min_value=101000,
+                                 max_value=110000):
+                logger.info("Failed solution health check.")
+            errors = True
+        errors = comm.allreduce(errors, MPI.LOR)
 
-        # cv = split_conserved(dim, state)
-        # tagged_cells = smoothness_indicator(discr, cv.mass, s0=s0_sc, kappa=kappa_sc)
-        # local_cfl = get_inviscid_cfl(discr, eos=eos, dt=current_dt, q=state)
-        # from grudge.op import nodal_max
-        # max_cfl = nodal_max(discr, "vol", local_cfl)
+        if check_step(step, nrestart) and step != restart_step:
+            filename = snapshot_pattern.format(step=step, rank=rank, casename=casename)
+            restart_dictionary = {
+                "local_mesh": local_mesh,
+                "order": order,
+                "state": state,
+                "t": t,
+                "step": step,
+            }
+            write_restart_file(actx, restart_dictionary, filename)
 
-        # viz_fields = [("sponge_sigma", gen_sponge()), 
-        #               ("tagged cells", tagged_cells), 
-        #               ("cfl", local_cfl)]
-        return sim_checkpoint(discr=discr, visualizer=visualizer, eos=eos,
-                              cv=state, vizname=viz_path+casename,
-                              step=step, t=t, dt=dt, nstatus=nstatus,
-                              nviz=nviz, exittol=exittol,
-                              constant_cfl=constant_cfl, comm=comm, vis_timer=vis_timer,
-                              overwrite=True)   # , viz_fields=viz_fields)
+        if ((check_step(step, nviz) and step != restart_step) or errors):
+            local_cfl = get_inviscid_cfl(discr, eos=eos, dt=dt, cv=state)
+            tagged_cells = smoothness_indicator(discr, state.mass, s0=s0_sc,
+                                                kappa=kappa_sc)
+            viz_fields = [
+                ("cv", state), ("dv", eos.dependent_vars(state)),
+                ("sponge_sigma", gen_sponge()), ("tagged_cells", tagged_cells),
+                ("cfl", local_cfl)
+            ]
+            write_visfile(discr, viz_fields, visualizer, vizname=casename,
+                          step=step, t=t, overwrite=True, vis_timer=vis_timer)
 
     if rank == 0:
         logging.info("Stepping.")
