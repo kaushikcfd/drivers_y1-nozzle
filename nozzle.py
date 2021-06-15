@@ -452,20 +452,6 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
     outflow = PrescribedInviscidBoundary(fluid_solution_func=outflow_init)
     wall = IsothermalNoSlipBoundary()
 
-
-    # timestep estimate
-    #wave_speed = max(mach2*c_bkrnd,c_shkd+velocity2[0])
-    #char_len = 0.001
-    #area=char_len*char_len/2
-    #perimeter = 2*char_len+math.sqrt(2*char_len*char_len)
-    #h = 2*area/perimeter
-
-    #dt_est = 1/(wave_speed*order*order/h)
-    #print(f"Time step estimate {dt_est}\n")
-#
-    #dt_est_visc = 1/(wave_speed*order*order/h+alpha_sc*order*order*order*order/h/h)
-    #print(f"Viscous timestep estimate {dt_est_visc}\n")
-
     boundaries = {
         DTAG_BOUNDARY("Inflow"): inflow,
         DTAG_BOUNDARY("Outflow"): outflow,
@@ -568,8 +554,6 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
         vis_timer = IntervalTimer("t_vis", "Time spent visualizing")
         logmgr.add_quantity(vis_timer)
 
-    #visualizer = make_visualizer(discr, order + 3
-                                 #if discr.dim == 2 else order)
     visualizer = make_visualizer(discr)
 
     initname = "pseudoY0"
@@ -603,7 +587,6 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
                 alpha=alpha_sc, s0=s0_sc, kappa=kappa_sc)
             ) + sponge(cv=state, cv_ref=ref_state, sigma=sponge_sigma)
         )
-
 
     restart_path='restart_data/'
     viz_path='viz_data/'
