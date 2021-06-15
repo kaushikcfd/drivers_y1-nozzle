@@ -548,7 +548,7 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
 
         logmgr.add_watches([
                             ("step.max", "step = {value}, "), 
-                            ("t_sim.max", "sim time: {value:1.6e} s, "), 
+                            ("t_sim.max", "sim time: {value:1.6e} s,\n"), 
                             ("min_pressure", "------- P (min, max) (Pa) = ({value:1.9e}, "),
                             ("max_pressure",    "{value:1.9e})\n"),
                             ("min_temperature", "------- T (min, max) (K)  = ({value:7g}, "),
@@ -627,7 +627,7 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
             errors = True
         errors = comm.allreduce(errors, MPI.LOR)
 
-        if check_step(step, nrestart) and step != restart_step:
+        if check_step(step, nrestart) and step != restart_step and not errors:
             filename = snapshot_pattern.format(step=step, rank=rank, casename=casename)
             restart_dictionary = {
                 "local_mesh": local_mesh,
@@ -649,6 +649,10 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
             ]
             write_visfile(discr, viz_fields, visualizer, vizname=casename,
                           step=step, t=t, overwrite=True, vis_timer=vis_timer)
+
+        if errors:
+            import sys
+            sys.exit()
 
     if rank == 0:
         logging.info("Stepping.")
