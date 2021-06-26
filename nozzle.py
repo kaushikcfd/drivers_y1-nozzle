@@ -38,11 +38,8 @@ import pyopencl.array as cla  # noqa
 from functools import partial
 import math
 
-from pytools.obj_array import obj_array_vectorize
-import pickle
-
 from meshmode.array_context import PyOpenCLArrayContext
-from meshmode.dof_array import thaw, flatten, unflatten
+from meshmode.dof_array import thaw
 from meshmode.mesh import BTAG_ALL, BTAG_NONE  # noqa
 from grudge.dof_desc import DTAG_BOUNDARY
 from grudge.eager import EagerDGDiscretization
@@ -51,13 +48,9 @@ from grudge.op import nodal_max
 
 from mirgecom.profiling import PyOpenCLProfilingArrayContext
 
-from mirgecom.euler import euler_operator
 from mirgecom.navierstokes import ns_operator
 from mirgecom.fluid import make_conserved
-from mirgecom.artificial_viscosity import (
-    av_operator,
-    smoothness_indicator
-)
+from mirgecom.artificial_viscosity import av_operator, smoothness_indicator
 from mirgecom.inviscid import get_inviscid_cfl
 from mirgecom.simutil import (
     inviscid_sim_timestep,
@@ -65,44 +58,38 @@ from mirgecom.simutil import (
     generate_and_distribute_mesh,
     write_visfile,
     check_range_local,
-    check_naninf_local, 
-    check_range_local
+    check_naninf_local,
 )
-from mirgecom.restart import (
-    write_restart_file
-)
+from mirgecom.restart import write_restart_file
 from mirgecom.io import make_init_message
 from mirgecom.mpi import mpi_entry_point
 import pyopencl.tools as cl_tools
+
 # from mirgecom.checkstate import compare_states
-from mirgecom.integrators import (
-    rk4_step, 
-    lsrk54_step, 
-    lsrk144_step, 
-    euler_step
-)
+from mirgecom.integrators import rk4_step, lsrk54_step, lsrk144_step, euler_step
 from mirgecom.steppers import advance_state
 from mirgecom.boundary import (
     PrescribedInviscidBoundary,
-    AdiabaticSlipBoundary,
-    DummyBoundary,
-    PrescribedViscousBoundary,
-    IsothermalNoSlipBoundary
+    # AdiabaticSlipBoundary,
+    # DummyBoundary,
+    # PrescribedViscousBoundary,
+    IsothermalNoSlipBoundary,
 )
-from mirgecom.initializers import (
-    Lump,
-    Uniform,
-    PlanarDiscontinuity
-)
+from mirgecom.initializers import Uniform, PlanarDiscontinuity
 from mirgecom.eos import IdealSingleGas
 from mirgecom.transport import SimpleTransport
 
-from logpyle import IntervalTimer, LogQuantity
+from logpyle import IntervalTimer
 
 from mirgecom.euler import extract_vars_for_logging, units_for_logging
-from mirgecom.logging_quantities import (initialize_logmgr,
-    logmgr_add_many_discretization_quantities, logmgr_add_cl_device_info,
-    logmgr_set_time, LogUserQuantity)
+from mirgecom.logging_quantities import (
+    initialize_logmgr,
+    logmgr_add_many_discretization_quantities,
+    logmgr_add_cl_device_info,
+    logmgr_set_time,
+    LogUserQuantity,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -122,15 +109,13 @@ def get_pseudo_y0_mesh():
     before being used with the current main driver in this
     example.
     """
-    from meshmode.mesh.io import (
-        read_gmsh,
-        generate_gmsh,
-        ScriptWithFilesSource
-    )
+    from meshmode.mesh.io import read_gmsh, generate_gmsh, ScriptWithFilesSource
     import os
+
     if os.path.exists("data/pseudoY1nozzle.msh") is False:
         mesh = generate_gmsh(
-            ScriptWithFilesSource("""
+            ScriptWithFilesSource(
+                """
             Merge "data/pseudoY1nozzle.brep";
             Mesh.CharacteristicLengthMin = 1;
             Mesh.CharacteristicLengthMax = 10;
@@ -166,7 +151,12 @@ def get_pseudo_y0_mesh():
             Field[5].FieldsList = {2,4};
 
             Background Field = 5;
-        """, ["data/pseudoY1nozzle.brep"]), 3, target_unit="MM")
+        """,
+                ["data/pseudoY1nozzle.brep"],
+            ),
+            3,
+            target_unit="MM",
+        )
     else:
         mesh = read_gmsh("data/pseudoY1nozzle.msh")
 
@@ -174,39 +164,58 @@ def get_pseudo_y0_mesh():
 
 
 @mpi_entry_point
-def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=None,
-         snapshot_pattern="{casename}-{step:06d}-{rank:04d}.pkl", 
-         restart_step=None, restart_name=None,
-         use_profiling=False, use_logmgr=False, use_lazy_eval=False):
+def main(
+    ctx_factory=cl.create_some_context,
+    casename="nozzle",
+    user_input_file=None,
+    snapshot_pattern="{casename}-{step:06d}-{rank:04d}.pkl",
+    restart_step=None,
+    restart_name=None,
+    use_profiling=False,
+    use_logmgr=False,
+    use_lazy_eval=False,
+):
     """Drive the Y0 nozzle example."""
 
     from mpi4py import MPI
+
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
     nparts = comm.Get_size()
 
     if restart_name is None:
-      restart_name=casename
+        restart_name = casename
 
-    logmgr = initialize_logmgr(use_logmgr, filename=(f"{casename}.sqlite"),
-        mode="wo", mpi_comm=comm)
+    logmgr = initialize_logmgr(
+        use_logmgr, filename=(f"{casename}.sqlite"), mode="wo", mpi_comm=comm
+    )
 
     cl_ctx = ctx_factory()
     if use_profiling:
         if use_lazy_eval:
             raise RuntimeError("Cannot run lazy with profiling.")
-        queue = cl.CommandQueue(cl_ctx,
-            properties=cl.command_queue_properties.PROFILING_ENABLE)
-        actx = PyOpenCLProfilingArrayContext(queue,
+        queue = cl.CommandQueue(
+            cl_ctx, properties=cl.command_queue_properties.PROFILING_ENABLE
+        )
+        actx = PyOpenCLProfilingArrayContext(
+            queue,
             allocator=cl_tools.MemoryPool(cl_tools.ImmediateAllocator(queue)),
-            logmgr=logmgr)
+            logmgr=logmgr,
+        )
     else:
         queue = cl.CommandQueue(cl_ctx)
         if use_lazy_eval:
-            actx = PytatoArrayContext(queue)
+            from meshmode.array_context import PytatoPyOpenCLArrayContext
+
+            actx = PytatoPyOpenCLArrayContext(
+                queue,
+                allocator=cl_tools.MemoryPool(cl_tools.ImmediateAllocator(queue)),
+            )
         else:
-            actx = PyOpenCLArrayContext(queue,
-                allocator=cl_tools.MemoryPool(cl_tools.ImmediateAllocator(queue)))
+            actx = PyOpenCLArrayContext(
+                queue,
+                allocator=cl_tools.MemoryPool(cl_tools.ImmediateAllocator(queue)),
+            )
 
     # default input values that will be read from input (if they exist)
     nviz = 100
@@ -214,21 +223,21 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
     nhealth = 100
     nstatus = 1
     current_dt = 5e-8
-    t_final = 5.e-6
+    t_final = 5.0e-6
     order = 1
     alpha_sc = 0.5
     s0_sc = -5.0
     kappa_sc = 0.5
-    integrator="rk4"
+    integrator = "rk4"
 
     if user_input_file:
-        if rank ==0:
+        if rank == 0:
             with open(user_input_file) as f:
                 input_data = yaml.load(f, Loader=yaml.FullLoader)
         else:
-            input_data=None
+            input_data = None
         input_data = comm.bcast(input_data, root=0)
-            #print(input_data)
+        # print(input_data)
         try:
             nviz = int(input_data["nviz"])
         except KeyError:
@@ -276,30 +285,31 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
 
     # param sanity check
     allowed_integrators = ["rk4", "euler", "lsrk54", "lsrk144"]
-    if(integrator not in allowed_integrators):
+    if integrator not in allowed_integrators:
         error_message = "Invalid time integrator: {}".format(integrator)
         raise RuntimeError(error_message)
-        
-    if(rank == 0):
-        print(f'#### Simluation control data: ####')
-        print(f'\tnviz = {nviz}')
-        print(f'\tnrestart = {nrestart}')
-        print(f'\tnhealth = {nhealth}')
-        print(f'\tnstatus = {nstatus}')
-        print(f'\tcurrent_dt = {current_dt}')
-        print(f'\tt_final = {t_final}')
-        print(f'\torder = {order}')
-        print(f"\tShock capturing parameters: alpha {alpha_sc}, s0 {s0_sc}, kappa {kappa_sc}")
-        print(f"\tTime integration {integrator}")
-        print(f'#### Simluation control data: ####')
 
-    restart_path='restart_data/'
-    viz_path='viz_data/'
+    if rank == 0:
+        print("#### Simluation control data: ####")
+        print(f"\tnviz = {nviz}")
+        print(f"\tnrestart = {nrestart}")
+        print(f"\tnhealth = {nhealth}")
+        print(f"\tnstatus = {nstatus}")
+        print(f"\tcurrent_dt = {current_dt}")
+        print(f"\tt_final = {t_final}")
+        print(f"\torder = {order}")
+        print(f"\tShock capturing parameters: alpha {alpha_sc}, s0 {s0_sc},"
+              f" kappa {kappa_sc}")
+        print(f"\tTime integration {integrator}")
+        print("#### Simluation control data: ####")
+
+    restart_path = "restart_data/"
+    viz_path = "viz_data/"
 
     dim = 3
-    exittol = .09
+    # exittol = 0.09
     current_cfl = 1.0
-    vel_init = np.zeros(shape=(dim,))
+    # vel_init = np.zeros(shape=(dim,))
     vel_inflow = np.zeros(shape=(dim,))
     vel_outflow = np.zeros(shape=(dim,))
     current_t = 0
@@ -313,109 +323,141 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
     #   cp = 37.135 J/mol-K,
     #   rho= 1.977 kg/m^3 @298K
     gamma_CO2 = 1.289
-    R_CO2 = 8314.59/44.009
+    R_CO2 = 8314.59 / 44.009
 
     # background
     #   100 Pa
     #   298 K
     #   rho = 1.77619667e-3 kg/m^3
     #   velocity = 0,0,0
-    rho_bkrnd=1.77619667e-3
-    pres_bkrnd=100
-    temp_bkrnd=298
-     
+    rho_bkrnd = 1.77619667e-3
+    pres_bkrnd = 100
+    temp_bkrnd = 298
+
     # nozzle inflow #
-    # 
+    #
     # stagnation tempertuare 298 K
     # stagnation pressure 1.5e Pa
-    # 
-    # isentropic expansion based on the area ratios between the inlet (r=13e-3m) and the throat (r=6.3e-3)
+    #
+    # isentropic expansion based on the area ratios between the inlet (r=13e-3m)
+    # and the throat (r=6.3e-3)
     #
     # calculate the inlet Mach number from the area ratio
-    nozzleInletRadius = 13.e-3
-    nozzleThroatRadius = 6.3e-3
-    nozzleInletArea = math.pi*nozzleInletRadius*nozzleInletRadius
-    nozzleThroatArea = math.pi*nozzleThroatRadius*nozzleThroatRadius
-    inletAreaRatio = nozzleInletArea/nozzleThroatArea
+    nozzle_inlet_radius = 13.0e-3
+    nozzle_throat_radius = 6.3e-3
+    nozzle_inlet_area = math.pi * nozzle_inlet_radius * nozzle_inlet_radius
+    nozzle_throat_area = math.pi * nozzle_throat_radius * nozzle_throat_radius
+    inlet_area_ratio = nozzle_inlet_area / nozzle_throat_area
 
     def getMachFromAreaRatio(area_ratio, gamma, mach_guess=0.01):
-        error=1.e-8
-        nextError=1.e8
-        g=gamma
-        M0=mach_guess
-        while nextError > error:
-            R = ((2/(g+1)+((g-1)/(g+1)*M0*M0))**(((g+1)/(2*g-2))))/M0-area_ratio
-            dRdM = (2*((2/(g+1)+((g-1)/(g+1)*M0*M0))**(((g+1)/(2*g-2))))/
-                   (2*g-2)*(g-1)/(2/(g+1)+((g-1)/(g+1)*M0*M0))-
-                   ((2/(g+1)+((g-1)/(g+1)*M0*M0))**(((g+1)/(2*g-2))))* M0**(-2))
-      
-            M1=M0-R/dRdM
-            nextError=abs(R)
-            M0=M1
+        error = 1.0e-8
+        next_error = 1.0e8
+        g = gamma
+        M0 = mach_guess
+        while next_error > error:
+            R = (
+                (2 / (g + 1) + ((g - 1) / (g + 1) * M0 * M0))
+                ** (((g + 1) / (2 * g - 2)))
+            ) / M0 - area_ratio
+            dRdM = 2 * (
+                (2 / (g + 1) + ((g - 1) / (g + 1) * M0 * M0))
+                ** (((g + 1) / (2 * g - 2)))
+            ) / (2 * g - 2) * (g - 1) / (
+                2 / (g + 1) + ((g - 1) / (g + 1) * M0 * M0)
+            ) - (
+                (2 / (g + 1) + ((g - 1) / (g + 1) * M0 * M0))
+                ** (((g + 1) / (2 * g - 2)))
+            ) * M0 ** (
+                -2
+            )
+
+            M1 = M0 - R / dRdM
+            next_error = abs(R)
+            M0 = M1
 
         return M1
 
-
-    def getIsentropicPressure(mach, P0, gamma):
-        pressure=(1.+(gamma-1.)*0.5*math.pow(mach,2))
-        pressure=P0*math.pow(pressure,(-gamma/(gamma-1.)))
+    def get_isentropic_pressure(mach, P0, gamma):
+        pressure = 1.0 + (gamma - 1.0) * 0.5 * math.pow(mach, 2)
+        pressure = P0 * math.pow(pressure, (-gamma / (gamma - 1.0)))
         return pressure
 
-  
-    def getIsentropicTemperature(mach, T0, gamma):
-      temperature=(1.+(gamma-1.)*0.5*math.pow(mach,2))
-      temperature=T0*math.pow(temperature,-1.0)
-      return temperature
+    def get_isentropic_temperature(mach, T0, gamma):
+        temperature = 1.0 + (gamma - 1.0) * 0.5 * math.pow(mach, 2)
+        temperature = T0 * math.pow(temperature, -1.0)
+        return temperature
 
-    inlet_mach = getMachFromAreaRatio(area_ratio = inletAreaRatio, gamma=gamma_CO2, mach_guess = 0.01);
+    inlet_mach = getMachFromAreaRatio(
+        area_ratio=inlet_area_ratio, gamma=gamma_CO2, mach_guess=0.01
+    )
     # ramp the stagnation pressure
     start_ramp_pres = 1000
-    ramp_interval = 1.e-3
+    ramp_interval = 1.0e-3
     t_ramp_start = 1e-5
-    pres_inflow = getIsentropicPressure(mach=inlet_mach, P0=start_ramp_pres, gamma=gamma_CO2)
-    temp_inflow = getIsentropicTemperature(mach=inlet_mach, T0=298, gamma=gamma_CO2)
-    rho_inflow = pres_inflow/temp_inflow/R_CO2
+    pres_inflow = get_isentropic_pressure(
+        mach=inlet_mach, P0=start_ramp_pres, gamma=gamma_CO2
+    )
+    temp_inflow = get_isentropic_temperature(mach=inlet_mach,
+                                             T0=298,
+                                             gamma=gamma_CO2)
+    rho_inflow = pres_inflow / temp_inflow / R_CO2
     end_ramp_pres = 150000
-    pres_inflow_final = getIsentropicPressure(mach=inlet_mach, P0=end_ramp_pres, gamma=gamma_CO2)
-    vel_inflow[0] = inlet_mach*math.sqrt(gamma_CO2*pres_inflow/rho_inflow)
+    pres_inflow_final = get_isentropic_pressure(
+        mach=inlet_mach, P0=end_ramp_pres, gamma=gamma_CO2
+    )
+    vel_inflow[0] = inlet_mach * math.sqrt(gamma_CO2 * pres_inflow / rho_inflow)
 
     if rank == 0:
-        print(f'inlet Mach number {inlet_mach}')
-        print(f'inlet temperature {temp_inflow}')
-        print(f'inlet pressure {pres_inflow}')
-        print(f'final inlet pressure {pres_inflow_final}')
-
+        print(f"inlet Mach number {inlet_mach}")
+        print(f"inlet temperature {temp_inflow}")
+        print(f"inlet pressure {pres_inflow}")
+        print(f"final inlet pressure {pres_inflow_final}")
 
     allowed_integrators = ["rk4", "euler", "lsrk54", "lsrk144"]
-    timestepper=rk4_step
+    timestepper = rk4_step
     if integrator == "euler":
         timestepper = euler_step
     if integrator == "lsrk54":
         timestepper = lsrk54_step
     if integrator == "lsrk144":
         timestepper = lsrk144_step
-    mu = 1.e-5
-    kappa = rho_bkrnd*mu/0.75
+    mu = 1.0e-5
+    kappa = rho_bkrnd * mu / 0.75
     transport_model = SimpleTransport(viscosity=mu, thermal_conductivity=kappa)
-    eos = IdealSingleGas(gamma=gamma_CO2, gas_const=R_CO2, transport_model=transport_model)
-    bulk_init = PlanarDiscontinuity(dim=dim, disc_location=-.30, sigma=0.005,
-                              temperature_left=temp_inflow, temperature_right=temp_bkrnd,
-                              pressure_left=pres_inflow, pressure_right=pres_bkrnd,
-                              velocity_left=vel_inflow, velocity_right=vel_outflow)
+    eos = IdealSingleGas(
+        gamma=gamma_CO2, gas_const=R_CO2, transport_model=transport_model
+    )
+    bulk_init = PlanarDiscontinuity(
+        dim=dim,
+        disc_location=-0.30,
+        sigma=0.005,
+        temperature_left=temp_inflow,
+        temperature_right=temp_bkrnd,
+        pressure_left=pres_inflow,
+        pressure_right=pres_bkrnd,
+        velocity_left=vel_inflow,
+        velocity_right=vel_outflow,
+    )
 
     # pressure ramp function
-    def inflow_ramp_pressure(t, startP=start_ramp_pres, finalP=end_ramp_pres, 
-                             ramp_interval=ramp_interval, t_ramp_start=t_ramp_start):
-      if t > t_ramp_start:
-          rampPressure = min(finalP, startP+(t-t_ramp_start)/ramp_interval*(finalP-startP))
-      else:
-          rampPressure = startP
-      return rampPressure
-
+    def inflow_ramp_pressure(
+        t,
+        start_p=start_ramp_pres,
+        final_p=end_ramp_pres,
+        ramp_interval=ramp_interval,
+        t_ramp_start=t_ramp_start,
+    ):
+        if t > t_ramp_start:
+            ramp_pressure = min(
+                final_p,
+                start_p + (t - t_ramp_start) / ramp_interval * (final_p - start_p),
+            )
+        else:
+            ramp_pressure = start_p
+        return ramp_pressure
 
     class IsentropicInflow:
-
-        def __init__(self, *, dim=1, direc=0, T0=298, P0=1e5, mach= 0.01, p_fun = None):
+        def __init__(self, *, dim=1, direc=0, T0=298, P0=1e5, mach=0.01, p_fun=None):
 
             self._P0 = P0
             self._T0 = T0
@@ -423,11 +465,10 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
             self._direc = direc
             self._mach = mach
             if p_fun is not None:
-              self._p_fun = p_fun
-    
+                self._p_fun = p_fun
+
         def __call__(self, x_vec, *, time=0, eos, **kwargs):
-    
-    
+
             if self._p_fun is not None:
                 P0 = self._p_fun(time)
             else:
@@ -436,26 +477,35 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
 
             gamma = eos.gamma()
             gas_const = eos.gas_const()
-            pressure = getIsentropicPressure(mach=self._mach, P0=P0, gamma=gamma)
-            temperature = getIsentropicTemperature(mach=self._mach, T0=T0, gamma=gamma)
-            rho = pressure/temperature/gas_const
+            pressure = get_isentropic_pressure(mach=self._mach, P0=P0, gamma=gamma)
+            temperature = get_isentropic_temperature(
+                mach=self._mach, T0=T0, gamma=gamma
+            )
+            rho = pressure / temperature / gas_const
 
-            velocity = np.zeros(shape=(self._dim,)) 
+            velocity = np.zeros(shape=(self._dim,))
             velocity[self._direc] = self._mach*math.sqrt(gamma*pressure/rho)
-    
-            mass = 0.0*x_vec[0] + rho
-            mom = velocity*mass
-            energy = (pressure/(gamma - 1.0)) + np.dot(mom, mom)/(2.0*mass)
-            return make_conserved(dim=self._dim, mass=mass, momentum=mom, energy=energy)
 
+            mass = 0.0 * x_vec[0] + rho
+            mom = velocity * mass
+            energy = (pressure / (gamma - 1.0)) + np.dot(mom, mom) / (2.0 * mass)
+            return make_conserved(
+                dim=self._dim, mass=mass, momentum=mom, energy=energy
+            )
 
-    inflow_init = IsentropicInflow(dim=dim, T0=298, P0=start_ramp_pres, 
-                                   mach = inlet_mach , p_fun=inflow_ramp_pressure)
-    outflow_init = Uniform(dim=dim, rho=rho_bkrnd, p=pres_bkrnd,
-                           velocity=vel_outflow)
+    inflow_init = IsentropicInflow(
+        dim=dim,
+        T0=298,
+        P0=start_ramp_pres,
+        mach=inlet_mach,
+        p_fun=inflow_ramp_pressure,
+    )
+    outflow_init = Uniform(
+        dim=dim, rho=rho_bkrnd, p=pres_bkrnd, velocity=vel_outflow
+    )
 
-    #inflow = PrescribedViscousBoundary(q_func=inflow_init)
-    #outflow = PrescribedViscousBoundary(q_func=outflow_init)
+    # inflow = PrescribedViscousBoundary(q_func=inflow_init)
+    # outflow = PrescribedViscousBoundary(q_func=outflow_init)
     inflow = PrescribedInviscidBoundary(fluid_solution_func=inflow_init)
     outflow = PrescribedInviscidBoundary(fluid_solution_func=outflow_init)
     wall = IsothermalNoSlipBoundary()
@@ -463,16 +513,20 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
     boundaries = {
         DTAG_BOUNDARY("Inflow"): inflow,
         DTAG_BOUNDARY("Outflow"): outflow,
-        DTAG_BOUNDARY("Wall"): wall
+        DTAG_BOUNDARY("Wall"): wall,
     }
 
     if restart_step is None:
-        local_mesh, global_nelements = generate_and_distribute_mesh(comm, get_pseudo_y0_mesh)
+        local_mesh, global_nelements = generate_and_distribute_mesh(
+            comm, get_pseudo_y0_mesh
+        )
         local_nelements = local_mesh.nelements
 
     else:  # Restart
         from mirgecom.simutil import read_restart_data
-        restart_file = 'restart_data/'+snapshot_pattern.format(casename=restart_name, step=restart_step, rank=rank)
+        restart_file = "restart_data/" + snapshot_pattern.format(casename=restart_name,
+                                                                 step=restart_step,
+                                                                 rank=rank)
         restart_data = read_restart_data(actx, restart_file)
 
         local_mesh = restart_data["local_mesh"]
@@ -491,16 +545,17 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
     # initialize the sponge field
     def gen_sponge():
         thickness = 0.15
-        amplitude = 1./current_dt/25.
+        amplitude = 1.0 / current_dt / 25.0
         x0 = 0.05
-        
-        return (amplitude *  actx.np.where(
-            nodes[0]>x0,
-            zeros+((nodes[0]-x0)/thickness)*((nodes[0]-x0)/thickness),
-            zeros+0.0))
+
+        return amplitude * actx.np.where(
+            nodes[-1] > x0,
+            zeros + ((nodes[0] - x0) / thickness) * ((nodes[0] - x0) / thickness),
+            zeros + 0.0,
+        )
 
     zeros = 0 * nodes[0]
-    sponge_sigma =  gen_sponge()
+    sponge_sigma = gen_sponge()
     ref_state = bulk_init(x_vec=nodes, eos=eos, time=0.0)
 
     if restart_step is None:
@@ -509,7 +564,7 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
         # for Discontinuity initial conditions
         current_state = bulk_init(x_vec=nodes, eos=eos, time=0.0)
         # for uniform background initial condition
-        #current_state = bulk_init(nodes, eos=eos)
+        # current_state = bulk_init(nodes, eos=eos)
     else:
         current_t = restart_data["t"]
         current_step = restart_step
@@ -520,22 +575,25 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
 
     if logmgr:
         logmgr_add_cl_device_info(logmgr, queue)
-        logmgr_add_many_discretization_quantities(logmgr, discr, dim,
-            extract_vars_for_logging, units_for_logging)
+        logmgr_add_many_discretization_quantities(
+            logmgr, discr, dim, extract_vars_for_logging, units_for_logging
+        )
         logmgr_set_time(logmgr, current_step, current_t)
         logmgr.add_quantity(log_cfl, interval=nstatus)
 
-        logmgr.add_watches([
-                            ("step.max", "step = {value}, "), 
-                            ("t_sim.max", "sim time: {value:1.6e} s, "), 
-                            ("cfl.max", "cfl = {value:1.4f}\n"), 
-                            ("min_pressure", "------- P (min, max) (Pa) = ({value:1.9e}, "),
-                            ("max_pressure",    "{value:1.9e})\n"),
-                            ("min_temperature", "------- T (min, max) (K)  = ({value:7g}, "),
-                            ("max_temperature",    "{value:7g})\n"),
-                            ("t_step.max", "------- step walltime: {value:6g} s, "),
-                            ("t_log.max", "log walltime: {value:6g} s")
-                           ])
+        logmgr.add_watches(
+            [
+                ("step.max", "step = {value}, "),
+                ("t_sim.max", "sim time: {value:1.6e} s, "),
+                ("cfl.max", "cfl = {value:1.4f}\n"),
+                ("min_pressure", "------- P (min, max) (Pa) = ({value:1.9e}, "),
+                ("max_pressure", "{value:1.9e})\n"),
+                ("min_temperature", "------- T (min, max) (K)  = ({value:7g}, "),
+                ("max_temperature", "{value:7g})\n"),
+                ("t_step.max", "------- step walltime: {value:6g} s, "),
+                ("t_log.max", "log walltime: {value:6g} s"),
+            ]
+        )
 
         try:
             logmgr.add_watches(["memory_usage.max"])
@@ -552,37 +610,55 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
 
     initname = "pseudoY0"
     eosname = eos.__class__.__name__
-    init_message = make_init_message(dim=dim, order=order,
-                                     nelements=local_nelements,
-                                     global_nelements=global_nelements,
-                                     dt=current_dt, t_final=t_final,
-                                     nstatus=nstatus, nviz=nviz,
-                                     cfl=current_cfl,
-                                     constant_cfl=constant_cfl,
-                                     initname=initname,
-                                     eosname=eosname, casename=casename)
+    init_message = make_init_message(
+        dim=dim,
+        order=order,
+        nelements=local_nelements,
+        global_nelements=global_nelements,
+        dt=current_dt,
+        t_final=t_final,
+        nstatus=nstatus,
+        nviz=nviz,
+        cfl=current_cfl,
+        constant_cfl=constant_cfl,
+        initname=initname,
+        eosname=eosname,
+        casename=casename,
+    )
     if rank == 0:
         logger.info(init_message)
 
-    get_timestep = partial(inviscid_sim_timestep, discr=discr, t=current_t,
-                           dt=current_dt, cfl=current_cfl, eos=eos,
-                           t_final=t_final, constant_cfl=constant_cfl)
+    get_timestep = partial(
+        inviscid_sim_timestep,
+        discr=discr,
+        t=current_t,
+        dt=current_dt,
+        cfl=current_cfl,
+        eos=eos,
+        t_final=t_final,
+        constant_cfl=constant_cfl,
+    )
 
-    
     def sponge(cv, cv_ref, sigma):
-        return(sigma*(cv_ref-cv))
+        return sigma * (cv_ref - cv)
 
     def my_rhs(t, state):
-        return ( 
-            ns_operator(discr, cv=state, t=t, boundaries=boundaries, eos=eos) +
-            make_conserved(dim, q=av_operator(
-                discr, q=state.join(), boundaries=boundaries,
-                boundary_kwargs={"time": t, "eos":eos},
-                alpha=alpha_sc, s0=s0_sc, kappa=kappa_sc)
-            ) + 
-            sponge(cv=state, cv_ref=ref_state, sigma=sponge_sigma)
+        return (
+            ns_operator(discr, cv=state, t=t, boundaries=boundaries, eos=eos)
+            + make_conserved(
+                dim,
+                q=av_operator(
+                    discr,
+                    q=state.join(),
+                    boundaries=boundaries,
+                    boundary_kwargs={"time": t, "eos": eos},
+                    alpha=alpha_sc,
+                    s0=s0_sc,
+                    kappa=kappa_sc,
+                ),
+            )
+            + sponge(cv=state, cv_ref=ref_state, sigma=sponge_sigma)
         )
-
 
     def my_checkpoint(step, t, dt, state, force=False):
         do_health = force or check_step(step, nhealth) and step > 0
@@ -599,20 +675,24 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
             if check_naninf_local(discr, "vol", dv.pressure):
                 errors = True
                 health_message += "Invalid pressure data found.\n"
-            elif check_range_local(discr, "vol", dv.pressure, min_value=1, max_value=2.e6):
+            elif check_range_local(
+                discr, "vol", dv.pressure, min_value=1, max_value=2.0e6
+            ):
                 errors = True
                 health_message += "Pressure data failed health check.\n"
 
         errors = comm.allreduce(errors, MPI.LOR)
         if errors:
-          if rank == 0:
-              logger.info("Fluid solution failed health check.")
-          if health_message:
-              logger.info(f"{rank=}:  {health_message}")
+            if rank == 0:
+                logger.info("Fluid solution failed health check.")
+            if health_message:
+                logger.info(f"{rank=}:  {health_message}")
 
-        #if check_step(step, nrestart) and step != restart_step and not errors:
+        # if check_step(step, nrestart) and step != restart_step and not errors:
         if do_restart or errors:
-            filename = restart_path+snapshot_pattern.format(step=step, rank=rank, casename=casename)
+            filename = restart_path + snapshot_pattern.format(
+                step=step, rank=rank, casename=casename
+            )
             restart_dictionary = {
                 "local_mesh": local_mesh,
                 "order": order,
@@ -620,7 +700,7 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
                 "t": t,
                 "step": step,
                 "global_nelements": global_nelements,
-                "num_parts": nparts
+                "num_parts": nparts,
             }
             write_restart_file(actx, restart_dictionary, filename, comm)
 
@@ -629,19 +709,28 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
             max_cfl = nodal_max(discr, "vol", local_cfl)
             log_cfl.set_quantity(max_cfl)
 
-        #if ((check_step(step, nviz) and step != restart_step) or errors):
+        # if ((check_step(step, nviz) and step != restart_step) or errors):
         if do_viz or errors:
-            tagged_cells = smoothness_indicator(discr, state.mass, s0=s0_sc,
-                                                kappa=kappa_sc)
+            tagged_cells = smoothness_indicator(
+                discr, state.mass, s0=s0_sc, kappa=kappa_sc
+            )
             viz_fields = [
-                ("cv", state), 
+                ("cv", state),
                 ("dv", eos.dependent_vars(state)),
-                ("sponge_sigma", gen_sponge()), 
+                ("sponge_sigma", gen_sponge()),
                 ("tagged_cells", tagged_cells),
-                ("cfl", local_cfl)
+                ("cfl", local_cfl),
             ]
-            write_visfile(discr, viz_fields, visualizer, vizname=viz_path+casename,
-                          step=step, t=t, overwrite=True, vis_timer=vis_timer)
+            write_visfile(
+                discr,
+                viz_fields,
+                visualizer,
+                vizname=viz_path + casename,
+                step=step,
+                t=t,
+                overwrite=True,
+                vis_timer=vis_timer,
+            )
 
         if errors:
             raise RuntimeError("Error detected by user checkpoint, exiting.")
@@ -651,19 +740,29 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
     if rank == 0:
         logging.info("Stepping.")
 
-    (current_step, current_t, current_state) = \
-        advance_state(rhs=my_rhs, timestepper=timestepper,
-                      checkpoint=my_checkpoint,
-                      get_timestep=get_timestep, state=current_state,
-                      t_final=t_final, t=current_t, istep=current_step,
-                      logmgr=logmgr,eos=eos,dim=dim)
-
+    (current_step, current_t, current_state) = advance_state(
+        rhs=my_rhs,
+        timestepper=timestepper,
+        checkpoint=my_checkpoint,
+        get_timestep=get_timestep,
+        state=current_state,
+        t_final=t_final,
+        t=current_t,
+        istep=current_step,
+        logmgr=logmgr,
+        eos=eos,
+        dim=dim,
+    )
 
     if rank == 0:
         logger.info("Checkpointing final state ...")
-    my_checkpoint(current_step, t=current_t,
-                  dt=(current_t - checkpoint_t),
-                  state=current_state, force=True)
+    my_checkpoint(
+        current_step,
+        t=current_t,
+        dt=(current_t - checkpoint_t),
+        state=current_state,
+        force=True,
+    )
 
     if logmgr:
         logmgr.close()
@@ -675,58 +774,97 @@ def main(ctx_factory=cl.create_some_context, casename="nozzle", user_input_file=
 
 if __name__ == "__main__":
     import sys
-    
+
     logging.basicConfig(format="%(message)s", level=logging.INFO)
 
     import argparse
-    parser = argparse.ArgumentParser(description="MIRGE-Com Isentropic Nozzle Driver")
-    parser.add_argument('-r', '--restart_file',  type=ascii, 
-                        dest='restart_file', nargs='?', action='store', 
-                        help='simulation restart file')
-    parser.add_argument('-i', '--input_file',  type=ascii,
-                        dest='input_file', nargs='?', action='store',
-                        help='simulation config file')
-    parser.add_argument('-c', '--casename',  type=ascii,
-                        dest='casename', nargs='?', action='store',
-                        help='simulation case name')
-    parser.add_argument("--profile", action="store_true", default=False,
-        help="enable kernel profiling [OFF]")
-    parser.add_argument("--log", action="store_true", default=True,
-        help="enable logging profiling [ON]")
-    parser.add_argument("--lazy", action="store_true", default=False,
-        help="enable lazy evaluation [OFF]")
+
+    parser = argparse.ArgumentParser(
+        description="MIRGE-Com Isentropic Nozzle Driver"
+    )
+    parser.add_argument(
+        "-r",
+        "--restart_file",
+        type=ascii,
+        dest="restart_file",
+        nargs="?",
+        action="store",
+        help="simulation restart file",
+    )
+    parser.add_argument(
+        "-i",
+        "--input_file",
+        type=ascii,
+        dest="input_file",
+        nargs="?",
+        action="store",
+        help="simulation config file",
+    )
+    parser.add_argument(
+        "-c",
+        "--casename",
+        type=ascii,
+        dest="casename",
+        nargs="?",
+        action="store",
+        help="simulation case name",
+    )
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        default=False,
+        help="enable kernel profiling [OFF]",
+    )
+    parser.add_argument(
+        "--log",
+        action="store_true",
+        default=True,
+        help="enable logging profiling [ON]",
+    )
+    parser.add_argument(
+        "--lazy",
+        action="store_true",
+        default=False,
+        help="enable lazy evaluation [OFF]",
+    )
 
     args = parser.parse_args()
 
     # for writing output
     casename = "nozzle"
-    if(args.casename):
+    if args.casename:
         print(f"Custom casename {args.casename}")
-        casename = (args.casename).replace("'","")
+        casename = (args.casename).replace("'", "")
     else:
         print(f"Default casename {casename}")
 
-    snapshot_pattern="{casename}-{step:06d}-{rank:04d}.pkl"
-    restart_step=None
-    restart_name=None
-    if(args.restart_file):
+    snapshot_pattern = "{casename}-{step:06d}-{rank:04d}.pkl"
+    restart_step = None
+    restart_name = None
+    if args.restart_file:
         print(f"Restarting from file {args.restart_file}")
         file_path, file_name = os.path.split(args.restart_file)
-        restart_step = int(file_name.split('-')[1])
-        restart_name = (file_name.split('-')[0]).replace("'","")
+        restart_step = int(file_name.split("-")[1])
+        restart_name = (file_name.split("-")[0]).replace("'", "")
         print(f"step {restart_step}")
-        print(f"name {restart_name}") 
+        print(f"name {restart_name}")
 
-    input_file=None
-    if(args.input_file):
-        input_file = (args.input_file).replace("'","")
+    input_file = None
+    if args.input_file:
+        input_file = (args.input_file).replace("'", "")
         print(f"Reading user input from {args.input_file}")
     else:
         print("No user input file, using default values")
 
     print(f"Running {sys.argv[0]}\n")
-    main(restart_step=restart_step, restart_name=restart_name, user_input_file=input_file,
-         snapshot_pattern=snapshot_pattern,
-         use_profiling=args.profile, use_lazy_eval=args.lazy, use_logmgr=args.log)
+    main(
+        restart_step=restart_step,
+        restart_name=restart_name,
+        user_input_file=input_file,
+        snapshot_pattern=snapshot_pattern,
+        use_profiling=args.profile,
+        use_lazy_eval=args.lazy,
+        use_logmgr=args.log
+    )
 
 # vim: foldmethod=marker
