@@ -331,8 +331,8 @@ def main(
     # calculate the inlet Mach number from the area ratio
     nozzle_inlet_radius = 13.0e-3
     nozzle_throat_radius = 6.3e-3
-    nozzle_inlet_area = math.pi * nozzle_inlet_radius * nozzle_inlet_radius
-    nozzle_throat_area = math.pi * nozzle_throat_radius * nozzle_throat_radius
+    nozzle_inlet_area = math.pi*nozzle_inlet_radius*nozzle_inlet_radius
+    nozzle_throat_area = math.pi*nozzle_throat_radius*nozzle_throat_radius
     inlet_area_ratio = nozzle_inlet_area / nozzle_throat_area
 
     def getMachFromAreaRatio(area_ratio, gamma, mach_guess=0.01):
@@ -342,18 +342,18 @@ def main(
         M0 = mach_guess
         while next_error > error:
             R = (
-                (2 / (g + 1) + ((g - 1) / (g + 1) * M0 * M0))
-                ** (((g + 1) / (2 * g - 2)))
+                (2 / (g + 1) + ((g - 1) / (g + 1)*M0*M0))
+                ** (((g + 1) / (2*g - 2)))
             ) / M0 - area_ratio
-            dRdM = 2 * (
-                (2 / (g + 1) + ((g - 1) / (g + 1) * M0 * M0))
-                ** (((g + 1) / (2 * g - 2)))
-            ) / (2 * g - 2) * (g - 1) / (
-                2 / (g + 1) + ((g - 1) / (g + 1) * M0 * M0)
+            dRdM = 2*(
+                (2 / (g + 1) + ((g - 1) / (g + 1)*M0*M0))
+                ** (((g + 1) / (2*g - 2)))
+            ) / (2*g - 2)*(g - 1) / (
+                2 / (g + 1) + ((g - 1) / (g + 1)*M0*M0)
             ) - (
-                (2 / (g + 1) + ((g - 1) / (g + 1) * M0 * M0))
-                ** (((g + 1) / (2 * g - 2)))
-            ) * M0 ** (
+                (2 / (g + 1) + ((g - 1) / (g + 1)*M0*M0))
+                ** (((g + 1) / (2*g - 2)))
+            )*M0 ** (
                 -2
             )
 
@@ -364,13 +364,13 @@ def main(
         return M1
 
     def getIsentropicPressure(mach, P0, gamma):
-        pressure = 1.0 + (gamma - 1.0) * 0.5 * math.pow(mach, 2)
-        pressure = P0 * math.pow(pressure, (-gamma / (gamma - 1.0)))
+        pressure = 1.0 + (gamma - 1.0)*0.5*math.pow(mach, 2)
+        pressure = P0*math.pow(pressure, (-gamma / (gamma - 1.0)))
         return pressure
 
     def getIsentropicTemperature(mach, T0, gamma):
-        temperature = 1.0 + (gamma - 1.0) * 0.5 * math.pow(mach, 2)
-        temperature = T0 * math.pow(temperature, -1.0)
+        temperature = 1.0 + (gamma - 1.0)*0.5*math.pow(mach, 2)
+        temperature = T0*math.pow(temperature, -1.0)
         return temperature
 
     inlet_mach = getMachFromAreaRatio(
@@ -397,7 +397,7 @@ def main(
 
     print(f"final inlet pressure {pres_inflow_final}")
 
-    vel_inflow[0] = inlet_mach * math.sqrt(gamma_CO2 * pres_inflow / rho_inflow)
+    vel_inflow[0] = inlet_mach*math.sqrt(gamma_CO2*pres_inflow / rho_inflow)
 
     # starting pressure for the inflow ramp
 
@@ -410,7 +410,7 @@ def main(
     if integrator == "lsrk144":
         timestepper = lsrk144_step
     mu = 1.0e-5
-    kappa = rho_bkrnd * mu / 0.75
+    kappa = rho_bkrnd*mu / 0.75
     transport_model = SimpleTransport(viscosity=mu, thermal_conductivity=kappa)
     eos = IdealSingleGas(
         gamma=gamma_CO2, gas_const=R_CO2, transport_model=transport_model
@@ -438,7 +438,7 @@ def main(
         if t > t_ramp_start:
             ramp_pressure = min(
                 final_p,
-                start_p + (t - t_ramp_start) / ramp_interval * (final_p - start_p),
+                start_p + (t - t_ramp_start) / ramp_interval*(final_p - start_p),
             )
         else:
             ramp_pressure = start_p
@@ -478,11 +478,11 @@ def main(
             # print(f'ramp temperature {temperature}')
 
             velocity = np.zeros(shape=(self._dim,))
-            velocity[self._direc] = self._mach * math.sqrt(gamma * pressure / rho)
+            velocity[self._direc] = self._mach*math.sqrt(gamma*pressure / rho)
 
-            mass = 0.0 * x_vec[0] + rho
-            mom = velocity * mass
-            energy = (pressure / (gamma - 1.0)) + np.dot(mom, mom) / (2.0 * mass)
+            mass = 0.0*x_vec[0] + rho
+            mom = velocity*mass
+            energy = (pressure / (gamma - 1.0)) + np.dot(mom, mom) / (2.0*mass)
             from mirgecom.fluid import join_conserved
 
             return join_conserved(
@@ -573,14 +573,14 @@ def main(
                             edge_len += (
                                 mesh.vertices[k, vertex_indices[i]]
                                 - mesh.vertices[k, vertex_indices[j]]
-                            ) * (
+                            )*(
                                 mesh.vertices[k, vertex_indices[i]]
                                 - mesh.vertices[k, vertex_indices[j]]
                             )
                         edge_len = sqrt(edge_len)
                         max_edge_len = max(max_edge_len, edge_len)
                     # print(edge_lens[0], mesh.vertices[0, vertex_indices[i]], mesh.vertices[1, vertex_indices[i]], mesh.vertices[2, vertex_indices[i]])  # noqa
-                    centroid = [0] * len(mesh.vertices)
+                    centroid = [0]*len(mesh.vertices)
                     for j in range(len(mesh.vertices)):
                         centroid[j] += mesh.vertices[j, vertex_indices[i]]
                 for i in range(len(mesh.vertices)):
@@ -630,13 +630,13 @@ def main(
         amplitude = 1.0 / current_dt / 25.0
         x0 = 0.05
 
-        return amplitude * actx.np.where(
+        return amplitude*actx.np.where(
             nodes[0] > x0,
-            zeros + ((nodes[0] - x0) / thickness) * ((nodes[0] - x0) / thickness),
+            zeros + ((nodes[0] - x0) / thickness)*((nodes[0] - x0) / thickness),
             zeros + 0.0,
         )
 
-    zeros = 0 * nodes[0]
+    zeros = 0*nodes[0]
     sponge_sigma = gen_sponge()
     ref_state = bulk_init(x_vec=nodes, eos=eos, time=0.0)
 
@@ -763,7 +763,7 @@ def main(
     )
 
     def sponge(q, q_ref, sigma):
-        return sigma * (q_ref - q)
+        return sigma*(q_ref - q)
 
     def my_rhs(t, state):
 
