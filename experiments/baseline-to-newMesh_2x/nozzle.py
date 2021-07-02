@@ -341,34 +341,34 @@ def main(
         M0 = mach_guess
         while next_error > error:
             R = (
-                (2 / (g+1)+((g - 1) / (g+1)*M0*M0))
-                ** (((g+1) / (2*g - 2)))
-            ) / M0 - area_ratio
+                (2 / (g+1)+((g-1) / (g+1)*M0*M0))
+                ** (((g+1) / (2*g-2)))
+            ) / M0-area_ratio
             dRdM = 2*(
-                (2 / (g+1)+((g - 1) / (g+1)*M0*M0))
-                ** (((g+1) / (2*g - 2)))
-            ) / (2*g - 2)*(g - 1) / (
-                2 / (g+1)+((g - 1) / (g+1)*M0*M0)
-            ) - (
-                (2 / (g+1)+((g - 1) / (g+1)*M0*M0))
-                ** (((g+1) / (2*g - 2)))
+                (2 / (g+1)+((g-1) / (g+1)*M0*M0))
+                ** (((g+1) / (2*g-2)))
+            ) / (2*g-2)*(g-1) / (
+                2 / (g+1)+((g-1) / (g+1)*M0*M0)
+            )-(
+                (2 / (g+1)+((g-1) / (g+1)*M0*M0))
+                ** (((g+1) / (2*g-2)))
             )*M0 ** (
                 -2
             )
 
-            M1 = M0 - R / dRdM
+            M1 = M0-R / dRdM
             next_error = abs(R)
             M0 = M1
 
         return M1
 
     def getIsentropicPressure(mach, P0, gamma):
-        pressure = 1.0+(gamma - 1.0)*0.5*math.pow(mach, 2)
-        pressure = P0*math.pow(pressure, (-gamma / (gamma - 1.0)))
+        pressure = 1.0+(gamma-1.0)*0.5*math.pow(mach, 2)
+        pressure = P0*math.pow(pressure, (-gamma / (gamma-1.0)))
         return pressure
 
     def getIsentropicTemperature(mach, T0, gamma):
-        temperature = 1.0+(gamma - 1.0)*0.5*math.pow(mach, 2)
+        temperature = 1.0+(gamma-1.0)*0.5*math.pow(mach, 2)
         temperature = T0*math.pow(temperature, -1.0)
         return temperature
 
@@ -437,7 +437,7 @@ def main(
         if t > t_ramp_start:
             ramp_pressure = min(
                 final_p,
-                start_p+(t - t_ramp_start) / ramp_interval*(final_p - start_p),
+                start_p+(t-t_ramp_start) / ramp_interval*(final_p-start_p),
             )
         else:
             ramp_pressure = start_p
@@ -481,7 +481,7 @@ def main(
 
             mass = 0.0*x_vec[0]+rho
             mom = velocity*mass
-            energy = (pressure / (gamma - 1.0))+np.dot(mom, mom) / (2.0*mass)
+            energy = (pressure / (gamma-1.0))+np.dot(mom, mom) / (2.0*mass)
             from mirgecom.fluid import join_conserved
 
             return join_conserved(
@@ -578,7 +578,7 @@ def main(
 
         return amplitude*actx.np.where(
             nodes[0] > x0,
-            zeros+((nodes[0] - x0) / thickness)*((nodes[0] - x0) / thickness),
+            zeros+((nodes[0]-x0) / thickness)*((nodes[0]-x0) / thickness),
             zeros+0.0,
         )
 
@@ -720,7 +720,7 @@ def main(
     )
 
     def sponge(q, q_ref, sigma):
-        return sigma*(q_ref - q)
+        return sigma*(q_ref-q)
 
     def my_rhs(t, state):
 
@@ -848,10 +848,10 @@ def main(
         logger.info("Checkpointing final state ...")
 
     my_checkpoint(
-        current_step, t=current_t, dt=(current_t - checkpoint_t), state=current_state
+        current_step, t=current_t, dt=(current_t-checkpoint_t), state=current_state
     )
 
-    if current_t - t_final < 0:
+    if current_t-t_final < 0:
         raise ValueError("Simulation exited abnormally")
 
     if logmgr:
