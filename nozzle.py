@@ -356,17 +356,17 @@ def main(
         M0 = mach_guess
         while next_error > error:
             R = (
-                (2 / (g + 1) + ((g - 1) / (g + 1)*M0*M0))
-                ** (((g + 1) / (2*g - 2)))
+                (2 / (g+1)+((g - 1) / (g+1)*M0*M0))
+                ** (((g+1) / (2*g - 2)))
             ) / M0 - area_ratio
             dRdM = 2*(
-                (2 / (g + 1) + ((g - 1) / (g + 1)*M0*M0))
-                ** (((g + 1) / (2*g - 2)))
+                (2 / (g+1)+((g - 1) / (g+1)*M0*M0))
+                ** (((g+1) / (2*g - 2)))
             ) / (2*g - 2)*(g - 1) / (
-                2 / (g + 1) + ((g - 1) / (g + 1)*M0*M0)
+                2 / (g+1)+((g - 1) / (g+1)*M0*M0)
             ) - (
-                (2 / (g + 1) + ((g - 1) / (g + 1)*M0*M0))
-                ** (((g + 1) / (2*g - 2)))
+                (2 / (g+1)+((g - 1) / (g+1)*M0*M0))
+                ** (((g+1) / (2*g - 2)))
             )*M0 ** (
                 -2
             )
@@ -378,12 +378,12 @@ def main(
         return M1
 
     def get_isentropic_pressure(mach, P0, gamma):
-        pressure = 1.0 + (gamma - 1.0)*0.5*math.pow(mach, 2)
+        pressure = 1.0+(gamma - 1.0)*0.5*math.pow(mach, 2)
         pressure = P0*math.pow(pressure, (-gamma / (gamma - 1.0)))
         return pressure
 
     def get_isentropic_temperature(mach, T0, gamma):
-        temperature = 1.0 + (gamma - 1.0)*0.5*math.pow(mach, 2)
+        temperature = 1.0+(gamma - 1.0)*0.5*math.pow(mach, 2)
         temperature = T0*math.pow(temperature, -1.0)
         return temperature
 
@@ -450,7 +450,7 @@ def main(
         if t > t_ramp_start:
             ramp_pressure = min(
                 final_p,
-                start_p + (t - t_ramp_start) / ramp_interval*(final_p - start_p),
+                start_p+(t - t_ramp_start) / ramp_interval*(final_p - start_p),
             )
         else:
             ramp_pressure = start_p
@@ -486,9 +486,9 @@ def main(
             velocity = np.zeros(shape=(self._dim,))
             velocity[self._direc] = self._mach*math.sqrt(gamma*pressure/rho)
 
-            mass = 0.0*x_vec[0] + rho
+            mass = 0.0*x_vec[0]+rho
             mom = velocity*mass
-            energy = (pressure / (gamma - 1.0)) + np.dot(mom, mom) / (2.0*mass)
+            energy = (pressure / (gamma - 1.0))+np.dot(mom, mom) / (2.0*mass)
             return make_conserved(
                 dim=self._dim, mass=mass, momentum=mom, energy=energy
             )
@@ -524,7 +524,7 @@ def main(
 
     else:  # Restart
         from mirgecom.simutil import read_restart_data
-        restart_file = "restart_data/" + snapshot_pattern.format(casename=restart_name,
+        restart_file = "restart_data/"+snapshot_pattern.format(casename=restart_name,
                                                                  step=restart_step,
                                                                  rank=rank)
         restart_data = read_restart_data(actx, restart_file)
@@ -550,8 +550,8 @@ def main(
 
         return amplitude*actx.np.where(
             nodes[-1] > x0,
-            zeros + ((nodes[0] - x0) / thickness)*((nodes[0] - x0) / thickness),
-            zeros + 0.0,
+            zeros+((nodes[0] - x0) / thickness)*((nodes[0] - x0) / thickness),
+            zeros+0.0,
         )
 
     zeros = 0*nodes[0]
@@ -645,7 +645,7 @@ def main(
     def my_rhs(t, state):
         return (
             ns_operator(discr, cv=state, t=t, boundaries=boundaries, eos=eos)
-            + make_conserved(
+           +make_conserved(
                 dim,
                 q=av_operator(
                     discr,
@@ -657,7 +657,7 @@ def main(
                     kappa=kappa_sc,
                 ),
             )
-            + sponge(cv=state, cv_ref=ref_state, sigma=sponge_sigma)
+           +sponge(cv=state, cv_ref=ref_state, sigma=sponge_sigma)
         )
 
     def my_checkpoint(step, t, dt, state, force=False):
@@ -690,7 +690,7 @@ def main(
 
         # if check_step(step, nrestart) and step != restart_step and not errors:
         if do_restart or errors:
-            filename = restart_path + snapshot_pattern.format(
+            filename = restart_path+snapshot_pattern.format(
                 step=step, rank=rank, casename=casename
             )
             restart_dictionary = {
@@ -725,7 +725,7 @@ def main(
                 discr,
                 viz_fields,
                 visualizer,
-                vizname=viz_path + casename,
+                vizname=viz_path+casename,
                 step=step,
                 t=t,
                 overwrite=True,

@@ -341,17 +341,17 @@ def main(
         M0 = mach_guess
         while next_error > error:
             R = (
-                (2 / (g + 1) + ((g - 1) / (g + 1)*M0*M0))
-                ** (((g + 1) / (2*g - 2)))
+                (2 / (g+1)+((g - 1) / (g+1)*M0*M0))
+                ** (((g+1) / (2*g - 2)))
             ) / M0 - area_ratio
             dRdM = 2*(
-                (2 / (g + 1) + ((g - 1) / (g + 1)*M0*M0))
-                ** (((g + 1) / (2*g - 2)))
+                (2 / (g+1)+((g - 1) / (g+1)*M0*M0))
+                ** (((g+1) / (2*g - 2)))
             ) / (2*g - 2)*(g - 1) / (
-                2 / (g + 1) + ((g - 1) / (g + 1)*M0*M0)
+                2 / (g+1)+((g - 1) / (g+1)*M0*M0)
             ) - (
-                (2 / (g + 1) + ((g - 1) / (g + 1)*M0*M0))
-                ** (((g + 1) / (2*g - 2)))
+                (2 / (g+1)+((g - 1) / (g+1)*M0*M0))
+                ** (((g+1) / (2*g - 2)))
             )*M0 ** (
                 -2
             )
@@ -363,12 +363,12 @@ def main(
         return M1
 
     def getIsentropicPressure(mach, P0, gamma):
-        pressure = 1.0 + (gamma - 1.0)*0.5*math.pow(mach, 2)
+        pressure = 1.0+(gamma - 1.0)*0.5*math.pow(mach, 2)
         pressure = P0*math.pow(pressure, (-gamma / (gamma - 1.0)))
         return pressure
 
     def getIsentropicTemperature(mach, T0, gamma):
-        temperature = 1.0 + (gamma - 1.0)*0.5*math.pow(mach, 2)
+        temperature = 1.0+(gamma - 1.0)*0.5*math.pow(mach, 2)
         temperature = T0*math.pow(temperature, -1.0)
         return temperature
 
@@ -437,7 +437,7 @@ def main(
         if t > t_ramp_start:
             ramp_pressure = min(
                 final_p,
-                start_p + (t - t_ramp_start) / ramp_interval*(final_p - start_p),
+                start_p+(t - t_ramp_start) / ramp_interval*(final_p - start_p),
             )
         else:
             ramp_pressure = start_p
@@ -479,9 +479,9 @@ def main(
             velocity = np.zeros(shape=(self._dim,))
             velocity[self._direc] = self._mach*math.sqrt(gamma*pressure / rho)
 
-            mass = 0.0*x_vec[0] + rho
+            mass = 0.0*x_vec[0]+rho
             mom = velocity*mass
-            energy = (pressure / (gamma - 1.0)) + np.dot(mom, mom) / (2.0*mass)
+            energy = (pressure / (gamma - 1.0))+np.dot(mom, mom) / (2.0*mass)
             from mirgecom.fluid import join_conserved
 
             return join_conserved(
@@ -533,7 +533,7 @@ def main(
     if restart_step:  # Restart
         with open(
             "restart_data/"
-            + snapshot_pattern.format(
+           +snapshot_pattern.format(
                 casename=restart_name, step=restart_step, rank=rank
             ),
             "rb",
@@ -578,8 +578,8 @@ def main(
 
         return amplitude*actx.np.where(
             nodes[0] > x0,
-            zeros + ((nodes[0] - x0) / thickness)*((nodes[0] - x0) / thickness),
-            zeros + 0.0,
+            zeros+((nodes[0] - x0) / thickness)*((nodes[0] - x0) / thickness),
+            zeros+0.0,
         )
 
     zeros = 0*nodes[0]
@@ -684,7 +684,7 @@ def main(
         vis_timer = IntervalTimer("t_vis", "Time spent visualizing")
         logmgr.add_quantity(vis_timer)
 
-    # visualizer = make_visualizer(discr, order + 3
+    # visualizer = make_visualizer(discr, order+3
     # if discr.dim == 2 else order)
     visualizer = make_visualizer(discr)
 
@@ -758,12 +758,12 @@ def main(
             exit()
 
         # return ( euler_operator(discr, q=state, t=t,boundaries=boundaries, eos=eos)
-        # + av_operator(discr,t=t, q=state, eos=eos, boundaries=boundaries,
+        #+av_operator(discr,t=t, q=state, eos=eos, boundaries=boundaries,
         # alpha=alpha_sc, s0=s0_sc, kappa=kappa_sc)
-        # + sponge(q=state, q_ref=ref_state, sigma=sponge_sigma))
+        #+sponge(q=state, q_ref=ref_state, sigma=sponge_sigma))
         return (
             ns_operator(discr, q=state, t=t, boundaries=boundaries, eos=eos)
-            + av_operator(
+           +av_operator(
                 discr,
                 q=state,
                 boundaries=boundaries,
@@ -772,7 +772,7 @@ def main(
                 s0=s0_sc,
                 kappa=kappa_sc,
             )
-            + sponge(q=state, q_ref=ref_state, sigma=sponge_sigma)
+           +sponge(q=state, q_ref=ref_state, sigma=sponge_sigma)
         )
 
     restart_path = "restart_data/"
@@ -789,7 +789,7 @@ def main(
         if write_restart is True:
             with open(
                 restart_path
-                + snapshot_pattern.format(casename=casename, step=step, rank=rank),
+               +snapshot_pattern.format(casename=casename, step=step, rank=rank),
                 "wb",
             ) as f:
                 pickle.dump(
@@ -813,7 +813,7 @@ def main(
             visualizer=visualizer,
             eos=eos,
             q=state,
-            vizname=viz_path + casename,
+            vizname=viz_path+casename,
             step=step,
             t=t,
             dt=dt,
